@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Video Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Random Video Chat</h1>
+            <p>Connect with strangers from around the world</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Start Screen -->
+            <div id="start-screen" class="screen active">
+                <div class="welcome-card">
+                    <h2>Welcome to Random Video Chat</h2>
+                    <p>Click "Start Chatting" to connect with a random stranger</p>
+                    <button id="start-chat-btn" class="btn btn-primary">Start Chatting</button>
+                </div>
+            </div>
+
+            <!-- Waiting Screen -->
+            <div id="waiting-screen" class="screen">
+                <div class="waiting-card">
+                    <div class="spinner"></div>
+                    <h2>Looking for someone to chat with...</h2>
+                    <p>Please wait while we find you a partner</p>
+                    <button id="cancel-search-btn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Chat Screen -->
+            <div id="chat-screen" class="screen">
+                <div class="chat-container">
+                    <div class="video-section">
+                        <div class="video-grid">
+                            <div class="video-container">
+                                <video id="local-video" autoplay muted playsinline></video>
+                                <div class="video-label">You</div>
+                            </div>
+                            <div class="video-container">
+                                <video id="remote-video" autoplay playsinline></video>
+                                <div class="video-label">Stranger</div>
+                            </div>
+                        </div>
+                        <div class="video-controls">
+                            <button id="mute-btn" class="control-btn" title="Mute/Unmute">
+                                <span class="icon">🔇</span>
+                            </button>
+                            <button id="video-btn" class="control-btn" title="Turn on/off video">
+                                <span class="icon">📹</span>
+                            </button>
+                            <button id="end-chat-btn" class="control-btn end-chat" title="End chat">
+                                <span class="icon">📞</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-section">
+                        <div id="chat-messages" class="chat-messages"></div>
+                        <div class="chat-input-container">
+                            <input type="text" id="chat-input" placeholder="Type a message..." maxlength="500">
+                            <button id="send-btn" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- End Screen -->
+            <div id="end-screen" class="screen">
+                <div class="end-card">
+                    <h2>Chat Ended</h2>
+                    <p>Thanks for using Random Video Chat!</p>
+                    <button id="new-chat-btn" class="btn btn-primary">Start New Chat</button>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>&copy; 2024 Random Video Chat. Connect with the world!</p>
+        </footer>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
