@@ -65,10 +65,21 @@ class VideoChat {
             this.partnerId = data.partnerId;
             this.showScreen('chat-screen');
             
-            // Ensure remote video element is ready
+            // Ensure remote video element is ready for both audio and video
             this.remoteVideo.muted = false;
             this.remoteVideo.autoplay = true;
             this.remoteVideo.playsInline = true;
+            this.remoteVideo.controls = false;
+            
+            // Set up event listeners for remote video
+            this.remoteVideo.oncanplay = () => {
+                console.log('Remote video can play');
+                this.remoteVideo.play().catch(e => console.log('Error playing remote video on canplay:', e));
+            };
+            
+            this.remoteVideo.onplay = () => {
+                console.log('Remote video started playing');
+            };
             
             // Initialize peer connection with a small delay
             setTimeout(() => {
@@ -81,7 +92,7 @@ class VideoChat {
                     console.log('Connection timeout, attempting restart...');
                     this.restartConnection();
                 }
-            }, 10000); // 10 second timeout
+            }, 15000); // Increased to 15 second timeout
         });
 
         this.socket.on('offer', async (data) => {
@@ -122,12 +133,33 @@ class VideoChat {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    sampleRate: 44100
                 }
             });
             
             this.localVideo.srcObject = this.localStream;
             this.localVideo.muted = true; // Mute local video to prevent echo
+            
+            // Verify we have both audio and video tracks
+            const audioTracks = this.localStream.getAudioTracks();
+            const videoTracks = this.localStream.getVideoTracks();
+            
+            console.log('Local audio tracks:', audioTracks.length);
+            console.log('Local video tracks:', videoTracks.length);
+            
+            if (audioTracks.length === 0) {
+                console.warn('No audio track found in local stream');
+            }
+            if (videoTracks.length === 0) {
+                console.warn('No video track found in local stream');
+            }
+            
+            // Ensure audio tracks are enabled
+            audioTracks.forEach(track => {
+                track.enabled = true;
+                console.log('Audio track enabled:', track.enabled, 'muted:', track.muted);
+            });
             
             // Wait a moment for video to load before starting chat
             setTimeout(() => {
@@ -151,9 +183,27 @@ class VideoChat {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Additional STUN servers for better connectivity
+                { urls: 'stun:stun.ekiga.net' },
+                { urls: 'stun:stun.ideasip.com' },
+                { urls: 'stun:stun.schlund.de' },
+                { urls: 'stun:stun.stunprotocol.org:3478' },
+                { urls: 'stun:stun.voiparound.com' },
+                { urls: 'stun:stun.voipbuster.com' },
+                { urls: 'stun:stun.voipstunt.com' },
+                { urls: 'stun:stun.counterpath.com' },
+                { urls: 'stun:stun.1und1.de' },
+                { urls: 'stun:stun.gmx.net' },
+                { urls: 'stun:stun.callwithus.com' },
+                { urls: 'stun:stun.internetcalls.com' }
             ],
-            iceCandidatePoolSize: 10
+            iceCandidatePoolSize: 10,
+            iceTransportPolicy: 'all',
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require'
         };
 
         this.peerConnection = new RTCPeerConnection(configuration);
@@ -169,10 +219,42 @@ class VideoChat {
             this.remoteStream = event.streams[0];
             this.remoteVideo.srcObject = this.remoteStream;
             
-            // Ensure video plays
+            // Ensure both video and audio play automatically
             this.remoteVideo.onloadedmetadata = () => {
-                this.remoteVideo.play().catch(e => console.log('Error playing remote video:', e));
+                console.log('Remote video metadata loaded, playing...');
+                this.forcePlayRemoteVideo();
             };
+            
+            // Also try to play when data is available
+            this.remoteVideo.oncanplay = () => {
+                console.log('Remote video can play, attempting to play...');
+                this.forcePlayRemoteVideo();
+            };
+            
+            // Handle audio tracks specifically
+            const audioTracks = this.remoteStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                console.log('Remote audio track found:', audioTracks[0]);
+                // Ensure audio plays automatically
+                this.remoteVideo.muted = false;
+                this.remoteVideo.autoplay = true;
+                this.remoteVideo.playsInline = true;
+                
+                // Set up audio track event listeners
+                audioTracks.forEach(track => {
+                    track.onmute = () => console.log('Remote audio track muted');
+                    track.onunmute = () => console.log('Remote audio track unmuted');
+                    track.onended = () => console.log('Remote audio track ended');
+                });
+            } else {
+                console.warn('No remote audio tracks found');
+            }
+            
+            // Handle video tracks
+            const videoTracks = this.remoteStream.getVideoTracks();
+            if (videoTracks.length > 0) {
+                console.log('Remote video track found:', videoTracks[0]);
+            }
         };
 
         // Handle ICE candidates
@@ -189,7 +271,14 @@ class VideoChat {
         // Handle connection state changes
         this.peerConnection.onconnectionstatechange = () => {
             console.log('Connection state:', this.peerConnection.connectionState);
-            if (this.peerConnection.connectionState === 'failed') {
+            if (this.peerConnection.connectionState === 'connected') {
+                console.log('WebRTC connection established successfully!');
+                // Clear connection timeout when connected
+                if (this.connectionTimeout) {
+                    clearTimeout(this.connectionTimeout);
+                    this.connectionTimeout = null;
+                }
+            } else if (this.peerConnection.connectionState === 'failed') {
                 console.log('Connection failed, attempting to restart...');
                 this.restartConnection();
             }
@@ -198,10 +287,17 @@ class VideoChat {
         // Handle ICE connection state changes
         this.peerConnection.oniceconnectionstatechange = () => {
             console.log('ICE connection state:', this.peerConnection.iceConnectionState);
-            if (this.peerConnection.iceConnectionState === 'failed') {
+            if (this.peerConnection.iceConnectionState === 'connected') {
+                console.log('ICE connection established successfully!');
+            } else if (this.peerConnection.iceConnectionState === 'failed') {
                 console.log('ICE connection failed, attempting to restart...');
                 this.restartConnection();
             }
+        };
+
+        // Handle ICE gathering state changes
+        this.peerConnection.onicegatheringstatechange = () => {
+            console.log('ICE gathering state:', this.peerConnection.iceGatheringState);
         };
 
         // Handle data channel (for additional reliability)
@@ -349,6 +445,34 @@ class VideoChat {
             screen.classList.remove('active');
         });
         document.getElementById(screenId).classList.add('active');
+    }
+
+    async forcePlayRemoteVideo() {
+        if (this.remoteVideo && this.remoteVideo.srcObject) {
+            try {
+                // Ensure video is not muted and has autoplay
+                this.remoteVideo.muted = false;
+                this.remoteVideo.autoplay = true;
+                this.remoteVideo.playsInline = true;
+                
+                // Try to play the video
+                await this.remoteVideo.play();
+                console.log('Remote video playing successfully');
+            } catch (error) {
+                console.log('Error playing remote video:', error);
+                
+                // If autoplay is blocked, try again after user interaction
+                if (error.name === 'NotAllowedError') {
+                    console.log('Autoplay blocked, will retry on user interaction');
+                    // Add a click listener to retry play
+                    const retryPlay = () => {
+                        this.remoteVideo.play().catch(e => console.log('Retry play failed:', e));
+                        document.removeEventListener('click', retryPlay);
+                    };
+                    document.addEventListener('click', retryPlay);
+                }
+            }
+        }
     }
 
     async restartConnection() {
