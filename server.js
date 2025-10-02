@@ -97,6 +97,7 @@ io.on('connection', (socket) => {
 
   // Handle WebRTC signaling
   socket.on('offer', (data) => {
+    console.log(`Offer from ${socket.id} to room ${data.roomId}`);
     socket.to(data.roomId).emit('offer', {
       offer: data.offer,
       from: socket.id
@@ -104,6 +105,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('answer', (data) => {
+    console.log(`Answer from ${socket.id} to room ${data.roomId}`);
     socket.to(data.roomId).emit('answer', {
       answer: data.answer,
       from: socket.id
@@ -111,6 +113,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('ice-candidate', (data) => {
+    console.log(`ICE candidate from ${socket.id} to room ${data.roomId}: ${data.candidate.candidate}`);
     socket.to(data.roomId).emit('ice-candidate', {
       candidate: data.candidate,
       from: socket.id

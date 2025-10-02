@@ -8,6 +8,7 @@ class VideoChat {
         this.partnerId = null;
         this.isMuted = false;
         this.isVideoOn = true;
+        this.pendingIceCandidates = [];
         
         this.initializeElements();
         this.setupEventListeners();
@@ -161,6 +162,9 @@ class VideoChat {
                 console.log('Audio track enabled:', track.enabled, 'muted:', track.muted);
             });
             
+            // Test TURN server connectivity
+            this.testTurnServer();
+            
             // Wait a moment for video to load before starting chat
             setTimeout(() => {
                 this.socket.emit('find-chat');
@@ -181,12 +185,14 @@ class VideoChat {
     async initializePeerConnection() {
         const configuration = {
             iceServers: [
+                // Google STUN servers
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
                 { urls: 'stun:stun3.l.google.com:19302' },
                 { urls: 'stun:stun4.l.google.com:19302' },
-                // Additional STUN servers for better connectivity
+                
+                // Additional reliable STUN servers
                 { urls: 'stun:stun.ekiga.net' },
                 { urls: 'stun:stun.ideasip.com' },
                 { urls: 'stun:stun.schlund.de' },
@@ -198,12 +204,48 @@ class VideoChat {
                 { urls: 'stun:stun.1und1.de' },
                 { urls: 'stun:stun.gmx.net' },
                 { urls: 'stun:stun.callwithus.com' },
-                { urls: 'stun:stun.internetcalls.com' }
+                { urls: 'stun:stun.internetcalls.com' },
+                
+                // TURN servers for NAT traversal (free public TURN servers)
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                
+                // Additional TURN servers
+                {
+                    urls: 'turn:freeturn.tel:3478',
+                    username: 'free',
+                    credential: 'free'
+                },
+                {
+                    urls: 'turn:freeturn.tel:3478?transport=tcp',
+                    username: 'free',
+                    credential: 'free'
+                }
             ],
             iceCandidatePoolSize: 10,
             iceTransportPolicy: 'all',
             bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require'
+            rtcpMuxPolicy: 'require',
+            iceCandidateTimeout: 30000,
+            iceGatheringTimeout: 10000
         };
 
         this.peerConnection = new RTCPeerConnection(configuration);
@@ -260,11 +302,13 @@ class VideoChat {
         // Handle ICE candidates
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('Sending ICE candidate');
+                console.log('Sending ICE candidate:', event.candidate.candidate);
                 this.socket.emit('ice-candidate', {
                     candidate: event.candidate,
                     roomId: this.roomId
                 });
+            } else {
+                console.log('ICE gathering complete');
             }
         };
 
@@ -292,6 +336,9 @@ class VideoChat {
             } else if (this.peerConnection.iceConnectionState === 'failed') {
                 console.log('ICE connection failed, attempting to restart...');
                 this.restartConnection();
+            } else if (this.peerConnection.iceConnectionState === 'disconnected') {
+                console.log('ICE connection disconnected, attempting to reconnect...');
+                this.restartConnection();
             }
         };
 
@@ -309,7 +356,8 @@ class VideoChat {
         try {
             const offer = await this.peerConnection.createOffer({
                 offerToReceiveAudio: true,
-                offerToReceiveVideo: true
+                offerToReceiveVideo: true,
+                iceRestart: false
             });
             await this.peerConnection.setLocalDescription(offer);
             console.log('Offer created and sent');
@@ -342,6 +390,20 @@ class VideoChat {
                 roomId: this.roomId
             });
             console.log('Answer sent to partner');
+            
+            // Process any pending ICE candidates
+            if (this.pendingIceCandidates && this.pendingIceCandidates.length > 0) {
+                console.log('Processing pending ICE candidates after answer:', this.pendingIceCandidates.length);
+                for (const candidate of this.pendingIceCandidates) {
+                    try {
+                        await this.peerConnection.addIceCandidate(candidate);
+                        console.log('Pending ICE candidate added successfully after answer');
+                    } catch (error) {
+                        console.error('Error adding pending ICE candidate after answer:', error);
+                    }
+                }
+                this.pendingIceCandidates = [];
+            }
         } catch (error) {
             console.error('Error handling offer:', error);
         }
@@ -352,20 +414,45 @@ class VideoChat {
         try {
             await this.peerConnection.setRemoteDescription(answer);
             console.log('Remote description set successfully');
+            
+            // Process any pending ICE candidates
+            if (this.pendingIceCandidates && this.pendingIceCandidates.length > 0) {
+                console.log('Processing pending ICE candidates:', this.pendingIceCandidates.length);
+                for (const candidate of this.pendingIceCandidates) {
+                    try {
+                        await this.peerConnection.addIceCandidate(candidate);
+                        console.log('Pending ICE candidate added successfully');
+                    } catch (error) {
+                        console.error('Error adding pending ICE candidate:', error);
+                    }
+                }
+                this.pendingIceCandidates = [];
+            }
         } catch (error) {
             console.error('Error handling answer:', error);
         }
     }
 
     async handleIceCandidate(candidate) {
-        console.log('Handling ICE candidate');
-        if (this.peerConnection) {
+        console.log('Handling ICE candidate:', candidate.candidate);
+        if (this.peerConnection && this.peerConnection.remoteDescription) {
             try {
                 await this.peerConnection.addIceCandidate(candidate);
                 console.log('ICE candidate added successfully');
             } catch (error) {
                 console.error('Error adding ICE candidate:', error);
+                // If the candidate is invalid, it might be because the connection is already established
+                if (error.name !== 'OperationError') {
+                    console.log('ICE candidate might be invalid or connection already established');
+                }
             }
+        } else {
+            console.log('Peer connection not ready or no remote description, storing candidate');
+            // Store candidate for later if peer connection isn't ready
+            if (!this.pendingIceCandidates) {
+                this.pendingIceCandidates = [];
+            }
+            this.pendingIceCandidates.push(candidate);
         }
     }
 
@@ -447,6 +534,40 @@ class VideoChat {
         document.getElementById(screenId).classList.add('active');
     }
 
+    async testTurnServer() {
+        console.log('Testing TURN server connectivity...');
+        const testConnection = new RTCPeerConnection({
+            iceServers: [
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
+        });
+        
+        testConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log('TURN server test - ICE candidate:', event.candidate.candidate);
+                if (event.candidate.candidate.includes('typ relay')) {
+                    console.log('✅ TURN server is working!');
+                }
+            }
+        };
+        
+        testConnection.onicegatheringstatechange = () => {
+            if (testConnection.iceGatheringState === 'complete') {
+                console.log('TURN server test complete');
+                testConnection.close();
+            }
+        };
+        
+        // Create a data channel to trigger ICE gathering
+        testConnection.createDataChannel('test');
+        const offer = await testConnection.createOffer();
+        await testConnection.setLocalDescription(offer);
+    }
+
     async forcePlayRemoteVideo() {
         if (this.remoteVideo && this.remoteVideo.srcObject) {
             try {
@@ -513,6 +634,7 @@ class VideoChat {
         this.partnerId = null;
         this.isMuted = false;
         this.isVideoOn = true;
+        this.pendingIceCandidates = [];
         
         // Reset UI
         this.muteBtn.classList.remove('active');
